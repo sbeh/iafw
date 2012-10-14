@@ -201,4 +201,69 @@ public final class Su {
 			listener.error(t);
 		}
 	}
+
+	// -------------------------------------------------------------------------
+	// Allow reading of kernel messages
+
+	private final static int CAT_KMSG_DEAD = -2;
+	private final static int CAT_KMSG_START = -1;
+	private int pidCatKmsg = CAT_KMSG_DEAD;
+
+	public boolean readsKernelMessages() {
+		return pidCatKmsg >= 0;
+	}
+
+	public void readKernelMessages() throws IOException {
+		if (pidCatKmsg != CAT_KMSG_DEAD)
+			throw new IllegalStateException("Already reading kernel messages");
+
+		pidCatKmsg = CAT_KMSG_START;
+
+		Log.d(TAG, "Start cat to read kernel messages");
+
+		Log.v(TAG, "Replacing listener to receive first line of cat");
+		final Listener listener = this.listener;
+		this.listener = new Listener() {
+			@Override
+			public void stdOut(final String line) {
+				pidCatKmsg = Integer.parseInt(line.split(" ")[0]);
+				Log.v(TAG, "PID for backgrounded cat is " + pidCatKmsg);
+
+				Log.v(TAG, "Restoring original listener");
+				Su.this.listener = listener;
+
+				Log.d(TAG, "Reading kernel messages in background");
+			}
+
+			@Override
+			public void stdErr(final String line) {
+				listener.stdErr(line);
+			}
+
+			@Override
+			public void error(final Throwable throwable) {
+				listener.error(throwable);
+			}
+		};
+		// File /proc/self/stat contains one line
+		// First word is process id of the process that opened /proc/self/stat
+		// More information to be found via 'man proc' and search for ']/stat'
+		// So at first cat will read and output this file and afterwards
+		// begin to read /proc/kmesg which
+		stdIn("cat /proc/self/stat /proc/kmsg &");
+
+		Log.v(TAG, "Wait for cat to output process id");
+	}
+
+	public void stopReadKernelMessages() throws IOException {
+		if (!readsKernelMessages())
+			throw new IllegalArgumentException("Not reading kernel messages");
+
+		Log.d(TAG, "Stop reading kernel messages in background");
+
+		stdIn("kill " + pidCatKmsg);
+
+		// TODO: Check 'echo $?' for exit code of kill
+		pidCatKmsg = CAT_KMSG_DEAD;
+	}
 }

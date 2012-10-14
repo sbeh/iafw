@@ -97,4 +97,51 @@ public class SuTest extends TestCase {
 		} catch (final Throwable t) {
 		}
 	}
+
+	int linesOnStdOut;
+
+	public void testReadKernelMessages() throws Throwable {
+		su = new Su(new SuListenerAdapter() {
+			@Override
+			public void stdOut(final String line) {
+				++linesOnStdOut;
+			}
+		});
+
+		assertTrue(0 == linesOnStdOut);
+
+		try {
+			su.stopReadKernelMessages();
+			fail("Could call stopReadKernelMessages() but never started");
+		} catch (final Throwable t) {
+		}
+
+		assertFalse(su.readsKernelMessages());
+		su.readKernelMessages();
+
+		failIn(800, "Start reading kernel messages took too long");
+		for (; !su.readsKernelMessages(); Thread.yield())
+			;
+
+		try {
+			su.readKernelMessages();
+			fail("Could call readKernelMessages() but already started");
+		} catch (final Throwable t) {
+		}
+
+		failIn(5000, "Did not receive enough kernel messages");
+		for (; linesOnStdOut < 2; Thread.yield())
+			;
+
+		su.stopReadKernelMessages();
+		assertFalse(su.readsKernelMessages());
+
+		try {
+			su.stopReadKernelMessages();
+			fail("Could call stopReadKernelMessages() but never stopped");
+		} catch (final Throwable t) {
+		}
+
+		su.stop();
+	}
 }
