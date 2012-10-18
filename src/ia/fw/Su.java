@@ -5,6 +5,7 @@ import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.OutputStreamWriter;
 import java.util.Date;
+import java.util.regex.Pattern;
 
 import android.util.Log;
 
@@ -265,5 +266,30 @@ public final class Su {
 
 		// TODO: Check 'echo $?' for exit code of kill
 		pidCatKmsg = CAT_KMSG_DEAD;
+	}
+
+	// -------------------------------------------------------------------------
+	// Allow all access to iptables
+
+	// Make sure no characters handled by shell get through
+	private static Pattern argsValidChars = Pattern.compile("^[ !\"#"/* $ */
+			+ "%"/* & */+ "'()"/* * */
+			+ "+,\\-./0-9:"/* ;< */+ "="/* > */+ "?@A-Z\\[\\\\\\]^_"/* ` */
+			+ "a-z{"/* | */+ "}"/* ~ */+ "]+$");
+
+	// In case someone tried it, let him know
+	public static class IptablesArgsException extends RuntimeException {
+		private static final long serialVersionUID = 8116321773534179178L;
+	}
+
+	public void iptables(final String args) throws IOException {
+		if (!isRunning())
+			throw new IllegalStateException("SU already stopped");
+
+		if (!argsValidChars.matcher(args).matches())
+			throw new IptablesArgsException();
+
+		Log.i(TAG, "New iptables command: " + args);
+		stdIn("iptables " + args);
 	}
 }

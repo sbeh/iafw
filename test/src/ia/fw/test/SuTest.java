@@ -2,6 +2,11 @@ package ia.fw.test;
 
 import ia.fw.Su;
 
+import java.net.DatagramPacket;
+import java.net.DatagramSocket;
+import java.net.InetAddress;
+import java.util.ArrayList;
+import java.util.Random;
 import java.util.Timer;
 import java.util.TimerTask;
 
@@ -141,6 +146,93 @@ public class SuTest extends TestCase {
 			fail("Could call stopReadKernelMessages() but never stopped");
 		} catch (final Throwable t) {
 		}
+
+		su.stop();
+	}
+
+	boolean input, forward, output;
+
+	public void testIpTables() throws Throwable {
+		su = new Su(new SuListenerAdapter() {
+			@Override
+			public void stdOut(final String line) {
+				if (line.contains(" INPUT "))
+					input = true;
+				if (line.contains(" FORWARD "))
+					forward = true;
+				if (line.contains(" OUTPUT "))
+					output = true;
+			}
+		});
+
+		su.iptables("-L -n");
+		su.stop();
+
+		assertTrue(input && forward && output);
+	}
+
+	boolean packetSeen;
+
+	public void testPaketLog() throws Throwable {
+		final InetAddress host = InetAddress.getLocalHost();
+		final int port = new Random().nextInt(Short.MAX_VALUE);
+
+		String iptopts = "";
+		iptopts += " -o lo";
+		iptopts += " -m udp -p 17 --dport " + port;
+		iptopts += " -j LOG --log-prefix 'SU TEST '";
+
+		su = new Su(new SuListenerAdapter() {
+			@Override
+			public void stdOut(final String line) {
+				if (line.contains(" SU TEST "))
+					packetSeen = true;
+			}
+		});
+		su.readKernelMessages();
+		su.iptables("-I OUTPUT 1" + iptopts);
+
+		final DatagramSocket socket;
+		final DatagramPacket packet;
+		socket = new DatagramSocket();
+		packet = new DatagramPacket(new byte[1], 1, host, port);
+
+		failIn(500, "Did not see any test udp packets");
+		for (; !packetSeen; socket.send(packet), Thread.yield())
+			;
+
+		su.iptables("-D OUTPUT" + iptopts);
+		su.stopReadKernelMessages();
+		su.stop();
+	}
+
+	public void testDenyShellEscape() throws Throwable {
+		final ArrayList<String> tests = new ArrayList<String>();
+
+		/* realistic, would really help to get device under foreign control */
+		tests.add("-L -n; echo BROKE IT");
+		tests.add("-L -n | echo BROKKE IT");
+		tests.add("-L -n & echo BROKKE IT");
+		tests.add("-L -n `echo BROKE IT`");
+		tests.add("${BROKE_IT}");
+
+		/* likely to just break the system */
+		tests.add("-L -n >/etc/broke_it");
+
+		/* unrealistic, because iptables will not print or output those files */
+		tests.add("</etc/passwd");
+		tests.add("/etc/*");
+
+		su = new Su(new SuListenerAdapter());
+
+		for (final String test : tests)
+			try {
+				su.iptables(test);
+
+				fail("Could escape iptables with test: " + test);
+			} catch (final Su.IptablesArgsException e) {
+				Log.v(TAG, "Test passed: " + e);
+			}
 
 		su.stop();
 	}
